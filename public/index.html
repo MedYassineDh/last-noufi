@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noufi - Card Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+
+        #gameContainer {
+            text-align: center;
+        }
+
+        #menuScreen, #searchingScreen, #matchFoundScreen {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+            max-width: 500px;
+        }
+
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ffd700;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        select option {
+            background: #1e3c72;
+            color: white;
+        }
+
+        select:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .searching-animation {
+            margin: 30px 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid rgba(255, 215, 0, 0.2);
+            border-top: 6px solid #ffd700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .queue-info {
+            margin-top: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .cancel-btn {
+            background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+            color: white;
+        }
+
+        .cancel-btn:hover {
+            box-shadow: 0 5px 20px rgba(255, 68, 68, 0.4);
+        }
+
+        h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: #ffd700;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .subtitle {
+            font-size: 16px;
+            margin-bottom: 30px;
+            color: #aaa;
+        }
+
+        .input-group {
+            margin: 20px 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            text-align: left;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ffd700;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        button {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+            color: #1e3c72;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255, 215, 0, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 215, 0, 0.2);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #gameCanvas {
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+            overflow: hidden;
+        }
+        
+        #gameCanvas canvas {
+            display: block;
+            border-radius: 15px;
+        }
+
+        .info-text {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #ddd;
+        }
+
+        /* Radio and Chicha UI */
+        .ui-controls {
+            position: fixed;
+            z-index: 10000;
+        }
+
+        .radio-container {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .radio-container:hover {
+            transform: scale(1.1);
+        }
+
+        .radio-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #8B4513 0%, #654321 100%);
+            border-radius: 10px;
+            border: 3px solid #ffd700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .radio-icon::before {
+            content: '📻';
+            font-size: 32px;
+        }
+
+        .radio-status {
+            position: absolute;
+            bottom: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+
+        .radio-icon.playing::after {
+            content: '';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 12px;
+            height: 12px;
+            background: #00ff00;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        .chicha-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .chicha-container:hover {
+            transform: scale(1.1);
+        }
+
+        .chicha-icon {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            border-radius: 50%;
+            border: 3px solid #95a5a6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .chicha-icon::before {
+            content: '💨';
+            font-size: 36px;
+        }
+
+        .chicha-icon.active {
+            animation: smokePulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        @keyframes smokePulse {
+            0%, 100% { box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5); }
+            50% { box-shadow: 0 4px 25px rgba(150, 150, 150, 0.8); }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- Radio Control (Top Left) -->
+        <div class="radio-container" id="radioControl">
+            <div class="radio-icon" id="radioIcon">
+                <div class="radio-status" id="radioStatus">OFF</div>
+            </div>
+        </div>
+
+        <!-- Chicha Control (Bottom Right) -->
+        <div class="chicha-container" id="chichaControl">
+            <div class="chicha-icon" id="chichaIcon"></div>
+        </div>
+
+        <!-- Main Menu -->
+        <div id="menuScreen">
+            <h1>🎴 NOUFI</h1>
+            <p class="subtitle">Multiplayer Card Game</p>
+            
+            <div class="input-group">
+                <label for="betAmount">Select Your Bet Amount:</label>
+                <select id="betAmount">
+                    <option value="10">$10 - Beginner</option>
+                    <option value="25">$25 - Low Stakes</option>
+                    <option value="50" selected>$50 - Standard</option>
+                    <option value="100">$100 - High Stakes</option>
+                    <option value="250">$250 - Pro</option>
+                    <option value="500">$500 - Elite</option>
+                </select>
+            </div>
+
+            <button id="findMatchBtn">Find Match</button>
+
+            <div class="info-text">
+                <strong>Game Rules:</strong><br>
+                • 3 cards dealt to each player<br>
+                • Closest to 9 wins<br>
+                • 10+ becomes ones digit (13→3, 10→0)<br>
+                • Winner takes the pot!
+            </div>
+        </div>
+
+        <!-- Matchmaking/Searching Screen -->
+        <div id="searchingScreen" class="hidden">
+            <h1>🎴 NOUFI</h1>
+            <p class="subtitle">Finding Your Match...</p>
+            
+            <div class="searching-animation">
+                <div class="spinner"></div>
+            </div>
+
+            <div class="status" id="searchStatus">
+                Searching for opponent with $<span id="searchBetAmount">50</span> bet...
+            </div>
+
+            <div class="queue-info" id="queueInfo">
+                Players in queue: <span id="queueCount">0</span>
+            </div>
+
+            <button id="cancelSearchBtn" class="cancel-btn">Cancel Search</button>
+
+            <div class="info-text" style="margin-top: 30px;">
+                You will be automatically matched with a player<br>
+                betting the same amount!
+            </div>
+        </div>
+
+        <!-- Match Found Screen -->
+        <div id="matchFoundScreen" class="hidden">
+            <h1>🎴 NOUFI</h1>
+            <p class="subtitle">Match Found!</p>
+            
+            <div class="status" style="background: rgba(0, 255, 0, 0.2);">
+                <strong>🎮 Opponent Found!</strong><br>
+                Bet Amount: $<span id="matchBetAmount">50</span><br>
+                Starting game...
+            </div>
+
+            <div class="info-text" style="margin-top: 30px;">
+                Good luck! 🍀
+            </div>
+        </div>
+
+        <!-- Game Canvas (Phaser) -->
+        <div id="gameCanvas" class="hidden"></div>
+    </div>
+
+    <!-- Socket.IO Client -->
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <!-- Phaser 3 -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    
+    <!-- Custom Services -->
+    <script src="walletService.js"></script>
+    <script src="audioManager.js"></script>
+    <script src="smokeManager.js"></script>
+    
+    <!-- Game Script -->
+    <script src="game.js"></script>
+    
+    <!-- UI Controls Initialization -->
+    <script>
+        // Radio control
+        document.getElementById('radioControl').addEventListener('click', () => {
+            window.audioManager.toggleRadio();
+            const icon = document.getElementById('radioIcon');
+            const status = document.getElementById('radioStatus');
+            
+            if (window.audioManager.radioPlaying) {
+                icon.classList.add('playing');
+                status.textContent = 'ON';
+            } else {
+                icon.classList.remove('playing');
+                status.textContent = 'OFF';
+            }
+        });
+        
+        // Chicha control
+        document.getElementById('chichaControl').addEventListener('click', () => {
+            window.audioManager.playChichaSound();
+            window.smokeManager.toggleSmoke();
+            const icon = document.getElementById('chichaIcon');
+            
+            if (window.smokeManager.isActive) {
+                icon.classList.add('active');
+            } else {
+                icon.classList.remove('active');
+            }
+        });
+        
+        // Initialize wallet from URL parameters
+        initWalletFromURL().then(balance => {
+            console.log('Wallet initialized with balance:', balance);
+        });
+    </script>
+</body>
+</html>

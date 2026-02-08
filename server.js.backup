@@ -1,0 +1,478 @@
+const express = require('express');
+const app = express();
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
+const path = require('path');
+
+// Serve static files from 'public' directory
+app.use(express.static('public'));
+
+// Serve index.html for root path
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check endpoint (for Render.com)
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
+// Game state storage
+const games = new Map(); // gameId -> game state
+const players = new Map(); // socketId -> player info
+const matchmakingQueue = new Map(); // betAmount -> [playerIds waiting]
+const rematchRequests = new Map(); // gameId -> {player1: bool, player2: bool}
+
+// Wallet Service Configuration
+const WALLET_API_URL = process.env.WALLET_API_URL || 'http://localhost:4000/api';
+const API_SECRET = process.env.API_SECRET || 'your-secret-key-here';
+
+// Card deck (1-10, with face cards as 10)
+const CARD_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10]; // J, Q, K = 10
+
+// Wallet Service
+class WalletService {
+    static async getBalance(userId, token) {
+        try {
+            const response = await fetch(`${WALLET_API_URL}/wallet/${userId}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-API-Secret': API_SECRET
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch wallet balance');
+            }
+            
+            const data = await response.json();
+            return data.balance || 1000; // Default if API fails
+        } catch (error) {
+            console.error('Wallet API Error:', error);
+            return 1000; // Fallback balance
+        }
+    }
+    
+    static async updateBalance(userId, amount, token, transactionType) {
+        try {
+            const response = await fetch(`${WALLET_API_URL}/wallet/${userId}/update`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-API-Secret': API_SECRET,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    amount: amount,
+                    type: transactionType, // 'win' or 'loss'
+                    game: 'noufi',
+                    timestamp: Date.now()
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to update wallet');
+            }
+            
+            const data = await response.json();
+            return data.newBalance;
+        } catch (error) {
+            console.error('Wallet Update Error:', error);
+            return null;
+        }
+    }
+}
+
+// Rematch Manager
+class RematchManager {
+    static createRequest(gameId, playerId) {
+        if (!rematchRequests.has(gameId)) {
+            rematchRequests.set(gameId, {});
+        }
+        
+        const requests = rematchRequests.get(gameId);
+        requests[playerId] = true;
+        
+        return requests;
+    }
+    
+    static checkBothAccepted(gameId) {
+        const requests = rematchRequests.get(gameId);
+        if (!requests) return false;
+        
+        const acceptedPlayers = Object.keys(requests).filter(id => requests[id]);
+        return acceptedPlayers.length === 2;
+    }
+    
+    static clearRequests(gameId) {
+        rematchRequests.delete(gameId);
+    }
+    
+    static getOpponentDecision(gameId, playerId) {
+        const requests = rematchRequests.get(gameId);
+        if (!requests) return null;
+        
+        const opponentId = Object.keys(requests).find(id => id !== playerId);
+        return opponentId ? requests[opponentId] : null;
+    }
+}
+
+class NoufiGame {
+    constructor(gameId, player1Id, player2Id, betAmount, player1Balance = 1000, player2Balance = 1000) {
+        this.gameId = gameId;
+        this.players = {
+            [player1Id]: {
+                id: player1Id,
+                cards: [],
+                score: 0,
+                bet: betAmount,
+                money: player1Balance,
+                ready: true
+            },
+            [player2Id]: {
+                id: player2Id,
+                cards: [],
+                score: 0,
+                bet: betAmount,
+                money: player2Balance,
+                ready: true
+            }
+        };
+        this.deck = this.createDeck();
+        this.currentTurn = 0;
+        this.gameStarted = false;
+        this.gameEnded = false;
+        this.winner = null;
+        this.rematchRequested = false;
+    }
+    
+    reset() {
+        // Reset for rematch - keep same players and balances
+        this.deck = this.createDeck();
+        this.currentTurn = 0;
+        this.gameStarted = false;
+        this.gameEnded = false;
+        this.winner = null;
+        this.rematchRequested = false;
+        
+        // Clear cards and scores
+        Object.keys(this.players).forEach(playerId => {
+            this.players[playerId].cards = [];
+            this.players[playerId].score = 0;
+        });
+    }
+            },
+            [player2Id]: {
+                id: player2Id,
+                cards: [],
+                score: 0,
+                bet: betAmount,
+                money: 1000,
+                ready: true
+            }
+        };
+        this.deck = this.createDeck();
+        this.currentTurn = 0;
+        this.gameStarted = false;
+        this.gameEnded = false;
+        this.winner = null;
+    }
+
+    createDeck() {
+        // Create 4 sets of cards (4 suits)
+        let deck = [];
+        for (let i = 0; i < 4; i++) {
+            deck = deck.concat([...CARD_VALUES]);
+        }
+        return this.shuffleDeck(deck);
+    }
+
+    shuffleDeck(deck) {
+        for (let i = deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        return deck;
+    }
+
+    dealCards() {
+        // Deal 3 cards to each player, one by one
+        const playerIds = Object.keys(this.players);
+        
+        for (let round = 0; round < 3; round++) {
+            for (let playerId of playerIds) {
+                const card = this.deck.pop();
+                this.players[playerId].cards.push(card);
+            }
+        }
+
+        // Calculate scores
+        this.calculateScores();
+    }
+
+    calculateScores() {
+        for (let playerId in this.players) {
+            const player = this.players[playerId];
+            let total = player.cards.reduce((sum, card) => sum + card, 0);
+            
+            // Noufi rule: if total >= 10, keep only the ones digit
+            // Example: 13 -> 3, 25 -> 5, 10 -> 0 (9ar3a)
+            player.score = total % 10;
+        }
+    }
+
+    determineWinner() {
+        const playerIds = Object.keys(this.players);
+        const p1 = this.players[playerIds[0]];
+        const p2 = this.players[playerIds[1]];
+
+        if (p1.score > p2.score) {
+            this.winner = playerIds[0];
+            p1.money += p2.bet;
+            p2.money -= p2.bet;
+        } else if (p2.score > p1.score) {
+            this.winner = playerIds[1];
+            p2.money += p1.bet;
+            p1.money -= p1.bet;
+        } else {
+            // Tie - no money exchange
+            this.winner = 'tie';
+        }
+
+        this.gameEnded = true;
+        return this.winner;
+    }
+
+    getGameState(playerId) {
+        const opponent = Object.keys(this.players).find(id => id !== playerId);
+        
+        return {
+            myCards: this.players[playerId].cards,
+            myScore: this.players[playerId].score,
+            myMoney: this.players[playerId].money,
+            opponentCards: this.gameEnded ? this.players[opponent].cards : [],
+            opponentScore: this.gameEnded ? this.players[opponent].score : null,
+            opponentMoney: this.players[opponent].money,
+            gameStarted: this.gameStarted,
+            gameEnded: this.gameEnded,
+            winner: this.winner,
+            betAmount: this.players[playerId].bet
+        };
+    }
+}
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+    console.log('New player connected:', socket.id);
+
+    // Player joins matchmaking queue
+    socket.on('findMatch', (data) => {
+        const { betAmount } = data;
+        const normalizedBet = betAmount || 50;
+        
+        console.log(`Player ${socket.id} searching for match with bet: $${normalizedBet}`);
+        
+        // Store player info
+        players.set(socket.id, { 
+            socketId: socket.id, 
+            betAmount: normalizedBet,
+            searching: true 
+        });
+
+        // Check if someone is already waiting with same bet amount
+        if (!matchmakingQueue.has(normalizedBet)) {
+            matchmakingQueue.set(normalizedBet, []);
+        }
+
+        const queue = matchmakingQueue.get(normalizedBet);
+
+        if (queue.length > 0) {
+            // Found a match!
+            const opponentId = queue.shift(); // Get first player in queue
+            
+            // Remove empty queues
+            if (queue.length === 0) {
+                matchmakingQueue.delete(normalizedBet);
+            }
+
+            // Create game
+            const gameId = `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const game = new NoufiGame(gameId, socket.id, opponentId, normalizedBet);
+            games.set(gameId, game);
+
+            // Update player info
+            players.get(socket.id).gameId = gameId;
+            players.get(socket.id).searching = false;
+            players.get(opponentId).gameId = gameId;
+            players.get(opponentId).searching = false;
+
+            // Create a room for these two players
+            socket.join(gameId);
+            io.sockets.sockets.get(opponentId).join(gameId);
+
+            console.log(`Match found! Game ${gameId}: ${socket.id} vs ${opponentId}`);
+
+            // Notify both players
+            io.to(gameId).emit('matchFound', {
+                message: 'Opponent found! Game starting...',
+                gameId: gameId,
+                betAmount: normalizedBet
+            });
+
+            // Start game after 2 seconds
+            setTimeout(() => {
+                startGame(gameId);
+            }, 2000);
+
+        } else {
+            // No match yet, add to queue
+            queue.push(socket.id);
+            
+            socket.emit('searching', {
+                message: 'Searching for opponent...',
+                betAmount: normalizedBet,
+                playersInQueue: queue.length
+            });
+
+            console.log(`Player ${socket.id} added to queue. Queue size: ${queue.length}`);
+        }
+    });
+
+    // Cancel search
+    socket.on('cancelSearch', () => {
+        const playerInfo = players.get(socket.id);
+        
+        if (playerInfo && playerInfo.searching) {
+            // Remove from all queues
+            matchmakingQueue.forEach((queue, betAmount) => {
+                const index = queue.indexOf(socket.id);
+                if (index > -1) {
+                    queue.splice(index, 1);
+                    console.log(`Player ${socket.id} removed from $${betAmount} queue`);
+                }
+                // Clean up empty queues
+                if (queue.length === 0) {
+                    matchmakingQueue.delete(betAmount);
+                }
+            });
+            
+            playerInfo.searching = false;
+            socket.emit('searchCancelled', { message: 'Search cancelled' });
+        }
+    });
+
+    // Player disconnect
+    socket.on('disconnect', () => {
+        console.log('Player disconnected:', socket.id);
+        const playerInfo = players.get(socket.id);
+        
+        if (playerInfo) {
+            // Remove from matchmaking queue if searching
+            if (playerInfo.searching) {
+                matchmakingQueue.forEach((queue, betAmount) => {
+                    const index = queue.indexOf(socket.id);
+                    if (index > -1) {
+                        queue.splice(index, 1);
+                    }
+                    if (queue.length === 0) {
+                        matchmakingQueue.delete(betAmount);
+                    }
+                });
+            }
+
+            // Handle ongoing game
+            const { gameId } = playerInfo;
+            if (gameId) {
+                const game = games.get(gameId);
+                
+                if (game && !game.gameEnded) {
+                    // Notify other player
+                    socket.to(gameId).emit('opponentDisconnected', {
+                        message: 'Opponent disconnected'
+                    });
+                }
+                
+                games.delete(gameId);
+            }
+            
+            players.delete(socket.id);
+        }
+    });
+
+    // Request new game
+    socket.on('playAgain', () => {
+        const playerInfo = players.get(socket.id);
+        if (playerInfo) {
+            const { gameId } = playerInfo;
+            
+            if (gameId) {
+                // Clean up old game
+                games.delete(gameId);
+                playerInfo.gameId = null;
+                
+                socket.to(gameId).emit('opponentWantsRematch', {
+                    message: 'Opponent wants to play again!'
+                });
+            }
+        }
+    });
+});
+
+// Helper function to start game
+function startGame(gameId) {
+    const game = games.get(gameId);
+    if (!game || game.gameStarted) return;
+
+    game.gameStarted = true;
+    
+    // Send initial state BEFORE dealing (so client can animate)
+    const playerIds = Object.keys(game.players);
+    
+    playerIds.forEach(playerId => {
+        io.to(playerId).emit('gameStarting', {
+            betAmount: game.players[playerId].bet,
+            myMoney: game.players[playerId].money
+        });
+    });
+    
+    // Deal cards after a delay (let client show chips/dealer first)
+    setTimeout(() => {
+        game.dealCards();
+        
+        // Send cards to deal (client will animate)
+        playerIds.forEach(playerId => {
+            const opponent = playerIds.find(id => id !== playerId);
+            io.to(playerId).emit('dealCards', {
+                myCards: game.players[playerId].cards,
+                opponentCardCount: 3, // Don't reveal opponent cards yet
+                myScore: game.players[playerId].score
+            });
+        });
+    }, 1000);
+    
+    // Calculate winner and send results after animations complete
+    setTimeout(() => {
+        game.determineWinner();
+        
+        playerIds.forEach(playerId => {
+            const opponent = playerIds.find(id => id !== playerId);
+            const results = {
+                winner: game.winner,
+                myScore: game.players[playerId].score,
+                myCards: game.players[playerId].cards,
+                opponentScore: game.players[opponent].score,
+                opponentCards: game.players[opponent].cards,
+                myNewMoney: game.players[playerId].money,
+                betAmount: game.players[playerId].bet
+            };
+            io.to(playerId).emit('gameResults', results);
+        });
+    }, 8000); // 8 seconds for full dealing animation
+}
+
+// Start server
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => {
+    console.log(`🎮 Noufi Game Server running on port ${PORT}`);
+    console.log(`   Visit: http://localhost:${PORT}`);
+});
