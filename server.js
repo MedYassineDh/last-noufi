@@ -1,3 +1,4 @@
+
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
@@ -40,11 +41,11 @@ class WalletService {
                     'X-API-Secret': API_SECRET
                 }
             });
-            
+
             if (!response.ok) {
                 throw new Error('Failed to fetch wallet balance');
             }
-            
+
             const data = await response.json();
             return data.balance || 1000; // Default if API fails
         } catch (error) {
@@ -52,7 +53,7 @@ class WalletService {
             return 1000; // Fallback balance
         }
     }
-    
+
     static async updateBalance(userId, amount, token, transactionType) {
         try {
             const response = await fetch(`${WALLET_API_URL}/wallet/${userId}/update`, {
@@ -69,11 +70,11 @@ class WalletService {
                     timestamp: Date.now()
                 })
             });
-            
+
             if (!response.ok) {
                 throw new Error('Failed to update wallet');
             }
-            
+
             const data = await response.json();
             return data.newBalance;
         } catch (error) {
@@ -89,29 +90,29 @@ class RematchManager {
         if (!rematchRequests.has(gameId)) {
             rematchRequests.set(gameId, {});
         }
-        
+
         const requests = rematchRequests.get(gameId);
         requests[playerId] = true;
-        
+
         return requests;
     }
-    
+
     static checkBothAccepted(gameId) {
         const requests = rematchRequests.get(gameId);
         if (!requests) return false;
-        
+
         const acceptedPlayers = Object.keys(requests).filter(id => requests[id]);
         return acceptedPlayers.length === 2;
     }
-    
+
     static clearRequests(gameId) {
         rematchRequests.delete(gameId);
     }
-    
+
     static getOpponentDecision(gameId, playerId) {
         const requests = rematchRequests.get(gameId);
         if (!requests) return null;
-        
+
         const opponentId = Object.keys(requests).find(id => id !== playerId);
         return opponentId ? requests[opponentId] : null;
     }
@@ -120,6 +121,7 @@ class RematchManager {
 class NoufiGame {
     constructor(gameId, player1Id, player2Id, betAmount, player1Balance = 1000, player2Balance = 1000) {
         this.gameId = gameId;
+
         this.players = {
             [player1Id]: {
                 id: player1Id,
@@ -138,6 +140,7 @@ class NoufiGame {
                 ready: true
             }
         };
+
         this.deck = this.createDeck();
         this.currentTurn = 0;
         this.gameStarted = false;
@@ -145,7 +148,7 @@ class NoufiGame {
         this.winner = null;
         this.rematchRequested = false;
     }
-    
+
     reset() {
         // Reset for rematch - keep same players and balances
         this.deck = this.createDeck();
@@ -154,28 +157,12 @@ class NoufiGame {
         this.gameEnded = false;
         this.winner = null;
         this.rematchRequested = false;
-        
+
         // Clear cards and scores
         Object.keys(this.players).forEach(playerId => {
             this.players[playerId].cards = [];
             this.players[playerId].score = 0;
         });
-    }
-            },
-            [player2Id]: {
-                id: player2Id,
-                cards: [],
-                score: 0,
-                bet: betAmount,
-                money: 1000,
-                ready: true
-            }
-        };
-        this.deck = this.createDeck();
-        this.currentTurn = 0;
-        this.gameStarted = false;
-        this.gameEnded = false;
-        this.winner = null;
     }
 
     createDeck() {
@@ -198,7 +185,7 @@ class NoufiGame {
     dealCards() {
         // Deal 3 cards to each player, one by one
         const playerIds = Object.keys(this.players);
-        
+
         for (let round = 0; round < 3; round++) {
             for (let playerId of playerIds) {
                 const card = this.deck.pop();
@@ -214,9 +201,8 @@ class NoufiGame {
         for (let playerId in this.players) {
             const player = this.players[playerId];
             let total = player.cards.reduce((sum, card) => sum + card, 0);
-            
-            // Noufi rule: if total >= 10, keep only the ones digit
-            // Example: 13 -> 3, 25 -> 5, 10 -> 0 (9ar3a)
+
+            // Noufi rule: keep only the ones digit
             player.score = total % 10;
         }
     }
@@ -228,15 +214,14 @@ class NoufiGame {
 
         if (p1.score > p2.score) {
             this.winner = playerIds[0];
-            p1.money += p2.bet;
-            p2.money -= p2.bet;
+            p1.money += p1.bet;
+            p2.money -= p1.bet;
         } else if (p2.score > p1.score) {
             this.winner = playerIds[1];
-            p2.money += p1.bet;
-            p1.money -= p1.bet;
+            p2.money += p2.bet;
+            p1.money -= p2.bet;
         } else {
-            // Tie - no money exchange
-            this.winner = 'tie';
+            this.winner = "tie";
         }
 
         this.gameEnded = true;
@@ -245,14 +230,16 @@ class NoufiGame {
 
     getGameState(playerId) {
         const opponent = Object.keys(this.players).find(id => id !== playerId);
-        
+
         return {
             myCards: this.players[playerId].cards,
             myScore: this.players[playerId].score,
             myMoney: this.players[playerId].money,
+
             opponentCards: this.gameEnded ? this.players[opponent].cards : [],
             opponentScore: this.gameEnded ? this.players[opponent].score : null,
             opponentMoney: this.players[opponent].money,
+
             gameStarted: this.gameStarted,
             gameEnded: this.gameEnded,
             winner: this.winner,
@@ -269,14 +256,14 @@ io.on('connection', (socket) => {
     socket.on('findMatch', (data) => {
         const { betAmount } = data;
         const normalizedBet = betAmount || 50;
-        
+
         console.log(`Player ${socket.id} searching for match with bet: $${normalizedBet}`);
-        
+
         // Store player info
-        players.set(socket.id, { 
-            socketId: socket.id, 
+        players.set(socket.id, {
+            socketId: socket.id,
             betAmount: normalizedBet,
-            searching: true 
+            searching: true
         });
 
         // Check if someone is already waiting with same bet amount
@@ -289,7 +276,7 @@ io.on('connection', (socket) => {
         if (queue.length > 0) {
             // Found a match!
             const opponentId = queue.shift(); // Get first player in queue
-            
+
             // Remove empty queues
             if (queue.length === 0) {
                 matchmakingQueue.delete(normalizedBet);
@@ -327,7 +314,7 @@ io.on('connection', (socket) => {
         } else {
             // No match yet, add to queue
             queue.push(socket.id);
-            
+
             socket.emit('searching', {
                 message: 'Searching for opponent...',
                 betAmount: normalizedBet,
@@ -341,7 +328,7 @@ io.on('connection', (socket) => {
     // Cancel search
     socket.on('cancelSearch', () => {
         const playerInfo = players.get(socket.id);
-        
+
         if (playerInfo && playerInfo.searching) {
             // Remove from all queues
             matchmakingQueue.forEach((queue, betAmount) => {
@@ -355,7 +342,7 @@ io.on('connection', (socket) => {
                     matchmakingQueue.delete(betAmount);
                 }
             });
-            
+
             playerInfo.searching = false;
             socket.emit('searchCancelled', { message: 'Search cancelled' });
         }
@@ -365,7 +352,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Player disconnected:', socket.id);
         const playerInfo = players.get(socket.id);
-        
+
         if (playerInfo) {
             // Remove from matchmaking queue if searching
             if (playerInfo.searching) {
@@ -384,17 +371,17 @@ io.on('connection', (socket) => {
             const { gameId } = playerInfo;
             if (gameId) {
                 const game = games.get(gameId);
-                
+
                 if (game && !game.gameEnded) {
                     // Notify other player
                     socket.to(gameId).emit('opponentDisconnected', {
                         message: 'Opponent disconnected'
                     });
                 }
-                
+
                 games.delete(gameId);
             }
-            
+
             players.delete(socket.id);
         }
     });
@@ -403,54 +390,54 @@ io.on('connection', (socket) => {
     socket.on('requestRematch', () => {
         const playerInfo = players.get(socket.id);
         if (!playerInfo || !playerInfo.gameId) return;
-        
+
         const { gameId } = playerInfo;
         const game = games.get(gameId);
-        
+
         if (!game || !game.gameEnded) return;
-        
+
         // Register this player's rematch request
         RematchManager.createRequest(gameId, socket.id);
-        
+
         // Notify opponent
         socket.to(gameId).emit('opponentWantsRematch', {
             message: 'Opponent wants to play again!'
         });
-        
+
         // Check if both players accepted
         if (RematchManager.checkBothAccepted(gameId)) {
             console.log(`Both players accepted rematch in ${gameId}`);
-            
+
             // Clear rematch requests
             RematchManager.clearRequests(gameId);
-            
+
             // Reset game state
             game.reset();
-            
+
             // Notify both players
             io.to(gameId).emit('rematchAccepted', {
                 message: 'Rematch starting!'
             });
-            
+
             // Start new game after delay
             setTimeout(() => {
                 startGame(gameId);
             }, 2000);
         }
     });
-    
+
     // Decline rematch
     socket.on('declineRematch', () => {
         const playerInfo = players.get(socket.id);
         if (!playerInfo || !playerInfo.gameId) return;
-        
+
         const { gameId } = playerInfo;
-        
+
         // Notify opponent
         socket.to(gameId).emit('rematchDeclined', {
             message: 'Opponent declined rematch'
         });
-        
+
         // Clean up
         RematchManager.clearRequests(gameId);
         games.delete(gameId);
@@ -463,21 +450,21 @@ function startGame(gameId) {
     if (!game || game.gameStarted) return;
 
     game.gameStarted = true;
-    
+
     // Send initial state BEFORE dealing (so client can animate)
     const playerIds = Object.keys(game.players);
-    
+
     playerIds.forEach(playerId => {
         io.to(playerId).emit('gameStarting', {
             betAmount: game.players[playerId].bet,
             myMoney: game.players[playerId].money
         });
     });
-    
+
     // Deal cards after a delay (let client show chips/dealer first)
     setTimeout(() => {
         game.dealCards();
-        
+
         // Send cards to deal (client will animate)
         playerIds.forEach(playerId => {
             const opponent = playerIds.find(id => id !== playerId);
@@ -488,11 +475,11 @@ function startGame(gameId) {
             });
         });
     }, 1000);
-    
+
     // Calculate winner and send results after animations complete
     setTimeout(() => {
         game.determineWinner();
-        
+
         playerIds.forEach(playerId => {
             const opponent = playerIds.find(id => id !== playerId);
             const results = {
