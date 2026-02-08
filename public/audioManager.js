@@ -9,8 +9,7 @@ class AudioManager {
         // Tunisian classic songs playlist (YouTube/external URLs)
         this.tunisianSongs = [
             '/assets/audio/song1.mp3', // You'll need to add these
-            '/assets/audio/song2.mp3',
-            '/assets/audio/song3.mp3'
+            '/assets/audio/song2.mp3'
         ];
         
         this.sounds = {
